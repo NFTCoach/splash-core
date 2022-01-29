@@ -4,9 +4,13 @@ pragma solidity 0.8.10;
 import "oz-contracts/access/Ownable.sol";
 import "oz-contracts/token/ERC20/IERC20.sol";
 
+import "./utils/ABDKMath64x64.sol";
+
 interface ILockable {
   function lockVeteranBatch(address user, uint256[] calldata ids) external;
   function lockRetiredBatch(address user, uint256[] calldata ids) external;
+  function unlockVeteranBatch(address user, uint256[] calldata ids) external;
+  function unlockRetiredBatch(address user, uint256[] calldata ids) external;
 } 
 
 interface IPlayerStatus {
@@ -40,8 +44,11 @@ struct StakeInfo {
   Pass pass;
   uint48 exitTimestamp;
   uint48 lastClaim;
+  uint48 enteredAt;
   uint48 exitedAt;
   uint256 stakedAmount;
+  uint256[] veteranList;
+  uint256[] retiredList;
 }
 
 /*
@@ -49,14 +56,23 @@ struct StakeInfo {
   * Make an emergency strat
 */
 contract Staking is Ownable {
+  using ABDKMath64x64 for int128;
+  using ABDKMath64x64 for uint256;
+
   ISplash20 splash20Contract;
   IManagement managementContract;
   IPlayer playerContract;
 
   /// @dev Abbreviated as "RPS" throughout the contract
   uint256 public rewardPerSecond;
+  // Max Stake Rate: 1.4
+  uint128 public maxStakeRate = 7.divu(5);
+  // Max Time Rate: 2.2
+  uint128 public maxTimeRate = 11.divu(5);
 
   event RewardChanged(uint256 newRPS);
+  event MaxStakeRateChanged(uint128 newStakeRate);
+  event MaxTimeRateChanged(uint128 newTimeRate);
 
   mapping(Pass => PassRequirement) public passRequirements;
   mapping(address => StakeInfo) public userToStakeInfo;
@@ -87,15 +103,42 @@ contract Staking is Ownable {
     emit RewardChanged(newRPS);
   }
 
+  function setMaxStakeRate(uint128 newRate) external onlyOwner{
+    maxStakeRate = newRate;
+    emit MaxStakeRateChanged(newRate);
+  }
+
+  function setMaxTimeRate(uint128 newRate) external onlyOwner {
+    maxTimeRate = newRate;
+    emit MaxStakeRateChanged(newRate);
+  }
+
   // #################### COEFFICENT #################### //
 
-  function getCoefficient(address user) external view returns(uint8) {
+  /**
+    @notice Returns player's coefficient based on their staking stats
+    @dev This is used in reward calculations
+    @return uint128 ABDK64x64 coefficient
+  */
+  function getCoefficient(address user) external view returns(uint128) {
     StakeInfo memory stakeInfo = userToStakeInfo[user];
 
     if(userToStakeInfo[user].status != StakeStatus.ENTERED)
       return 0;
-    
+
     PassRequirement memory requirement = passRequirements[stakeInfo.pass];
+    
+    int128 stakeRate = stakeInfo.stakedAmount.divu(requirement.stakeAmount);
+    int128 timeRate = uint256(stakeInfo.exitTimestamp - stakeInfo.enteredAt)
+      .divu(uint256(requirement.stakeTime));
+
+    if(stakeRate > maxStakeRate)
+      stakeRate = maxStakeRate;
+    
+    if(timeRate > maxTimeRate)
+      timeRate = maxTimeRate;
+
+    return stakeRate.mul(timeRate);
   }
 
   // #################### STAKING #################### //
@@ -118,8 +161,11 @@ contract Staking is Ownable {
       pass: pass,
       exitTimestamp: uint48(block.timestamp + stakeTime),
       lastClaim: uint48(block.timestamp),
+      enteredAt: uint48(block.timestamp),
       exitedAt: 0,
-      stakedAmount: stakeAmount
+      stakedAmount: stakeAmount,
+      veteranList: veteranList,
+      retiredList: retiredList
     });
 
     // These two call must revert if the player status is incorrect, or owner doesn't match
@@ -127,6 +173,33 @@ contract Staking is Ownable {
     managementContract.lockRetiredBatch(msg.sender, retiredList);
      
     // Transfer token to contract
-    require(splash20Contract.transferFrom(msg.sender, address(this), stakeAmount), "Coach checkout failed");
+    require(splash20Contract.transferFrom(msg.sender, address(this), stakeAmount), "Token checkout failed");
+  }
+
+  function exitStake() external {
+    StakeInfo memory info = userToStakeInfo[msg.sender];
+
+    require(info.status == StakeStatus.ENTERED, "Wrong status");
+
+    managementContract.lockVeteranBatch(msg.sender, info.veteranList);
+    managementContract.lockRetiredBatch(msg.sender, info.retiredList);
+
+    // Approve all stake directly if exiting at right time
+    if(block.timestamp >= userToStakeInfo[msg.sender].exitTimestamp) {
+      require(splash20Contract.approve(msg.sender, info.stakedAmount), "Token approve failed");      
+      delete userToStakeInfo[msg.sender];
+      
+      return;
+    }
+
+    StakeInfo storage infoStorage = userToStakeInfo[msg.sender];
+    infoStorage.status = StakeStatus.EXITED;
+    infoStorage.exitTimestamp = 0;
+    infoStorage.lastClaim = uint48(block.timestamp);
+    infoStorage.exitedAt = uint48(block.timestamp);
+  }
+
+  function claimPendingStake() external {
+
   }
 }
