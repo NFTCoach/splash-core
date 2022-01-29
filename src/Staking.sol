@@ -122,15 +122,15 @@ contract Staking is Ownable {
     @return int128 ABDK64x64 coefficient
   */
   function getCoefficient(address user) external view returns(int128) {
-    StakeInfo memory stakeInfo = userToStakeInfo[user];
+    StakeInfo memory info = userToStakeInfo[user];
 
-    if(userToStakeInfo[user].status != StakeStatus.ENTERED)
+    if(info.status != StakeStatus.ENTERED)
       return 0;
 
-    PassRequirement memory requirement = passRequirements[stakeInfo.pass];
+    PassRequirement memory requirement = passRequirements[info.pass];
     
-    int128 stakeRate = stakeInfo.stakedAmount.divu(requirement.stakeAmount);
-    int128 timeRate = uint256(stakeInfo.exitTimestamp - stakeInfo.enteredAt)
+    int128 stakeRate = info.stakedAmount.divu(requirement.stakeAmount);
+    int128 timeRate = uint256(info.exitTimestamp - info.enteredAt)
       .divu(uint256(requirement.stakeTime));
 
     if(stakeRate > maxStakeRate)
@@ -151,7 +151,8 @@ contract Staking is Ownable {
     uint256[] memory veteranList,
     uint256[] memory retiredList
   ) external {
-    require(userToStakeInfo[msg.sender].status == StakeStatus.NONE, "Wrong status");
+    StakeInfo memory info = userToStakeInfo[msg.sender];
+    require(info.status == StakeStatus.NONE, "Wrong status");
 
     PassRequirement memory requirement = passRequirements[pass];
     require(stakeAmount >= requirement.stakeAmount, "Invalid stake amount");
