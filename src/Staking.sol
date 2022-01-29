@@ -2,7 +2,7 @@
 pragma solidity 0.8.10;
 
 import "oz-contracts/access/Ownable.sol";
-import "oz-contracts/token/ERC20/IERC20.sol";
+import "oz-contracts/token/ERC20/ERC20.sol";
 
 import "./utils/ABDKMath64x64.sol";
 
@@ -20,7 +20,7 @@ interface IPlayerStatus {
 
 abstract contract IPlayer {}
 abstract contract IManagement is IPlayerStatus, ILockable {}
-abstract contract ISplash20 is IERC20 {}
+abstract contract ISplash20 is ERC20 {}
 
 enum StakeStatus { NONE, ENTERED, EXITED }
 enum Pass { NONE, BRONZE, SILVER, GOLD }
@@ -47,6 +47,7 @@ struct StakeInfo {
   uint48 enteredAt;
   uint48 exitedAt;
   uint256 stakedAmount;
+  uint256 claimedAmount;
   uint256[] veteranList;
   uint256[] retiredList;
 }
@@ -66,13 +67,13 @@ contract Staking is Ownable {
   /// @dev Abbreviated as "RPS" throughout the contract
   uint256 public rewardPerSecond;
   // Max Stake Rate: 1.4
-  uint128 public maxStakeRate = 7.divu(5);
+  int128 public maxStakeRate = uint256(7).divu(5);
   // Max Time Rate: 2.2
-  uint128 public maxTimeRate = 11.divu(5);
+  int128 public maxTimeRate = uint256(11).divu(5);
 
   event RewardChanged(uint256 newRPS);
-  event MaxStakeRateChanged(uint128 newStakeRate);
-  event MaxTimeRateChanged(uint128 newTimeRate);
+  event MaxStakeRateChanged(int128 newStakeRate);
+  event MaxTimeRateChanged(int128 newTimeRate);
 
   mapping(Pass => PassRequirement) public passRequirements;
   mapping(address => StakeInfo) public userToStakeInfo;
@@ -103,12 +104,12 @@ contract Staking is Ownable {
     emit RewardChanged(newRPS);
   }
 
-  function setMaxStakeRate(uint128 newRate) external onlyOwner{
+  function setMaxStakeRate(int128 newRate) external onlyOwner{
     maxStakeRate = newRate;
     emit MaxStakeRateChanged(newRate);
   }
 
-  function setMaxTimeRate(uint128 newRate) external onlyOwner {
+  function setMaxTimeRate(int128 newRate) external onlyOwner {
     maxTimeRate = newRate;
     emit MaxStakeRateChanged(newRate);
   }
@@ -118,9 +119,9 @@ contract Staking is Ownable {
   /**
     @notice Returns player's coefficient based on their staking stats
     @dev This is used in reward calculations
-    @return uint128 ABDK64x64 coefficient
+    @return int128 ABDK64x64 coefficient
   */
-  function getCoefficient(address user) external view returns(uint128) {
+  function getCoefficient(address user) external view returns(int128) {
     StakeInfo memory stakeInfo = userToStakeInfo[user];
 
     if(userToStakeInfo[user].status != StakeStatus.ENTERED)
@@ -164,6 +165,7 @@ contract Staking is Ownable {
       enteredAt: uint48(block.timestamp),
       exitedAt: 0,
       stakedAmount: stakeAmount,
+      claimedAmount: 0,
       veteranList: veteranList,
       retiredList: retiredList
     });
@@ -186,7 +188,7 @@ contract Staking is Ownable {
 
     // Approve all stake directly if exiting at right time
     if(block.timestamp >= userToStakeInfo[msg.sender].exitTimestamp) {
-      require(splash20Contract.approve(msg.sender, info.stakedAmount), "Token approve failed");      
+      require(splash20Contract.increaseAllowance(msg.sender, info.stakedAmount), "Token approve failed");      
       delete userToStakeInfo[msg.sender];
       
       return;
@@ -199,7 +201,40 @@ contract Staking is Ownable {
     infoStorage.exitedAt = uint48(block.timestamp);
   }
 
+  /**
+    @notice Claims staked amount after early exit
+  */
   function claimPendingStake() external {
+    StakeInfo memory info = userToStakeInfo[msg.sender];
+    require(info.status == StakeStatus.EXITED, "Wrong status");
+    require(block.timestamp - info.lastClaim > 15 minutes, "Too early to claim again");
+
+    assert(info.exitedAt > 0);
+    assert(info.exitTimestamp > info.exitedAt);
+    assert(block.timestamp > info.exitedAt);
+    
+    uint256 claimableAmount;
+    uint256 releaseTime = uint256(info.exitTimestamp - info.exitedAt);
+    uint256 waitedTime = uint256(block.timestamp - info.exitedAt);
+    
+    // If waiting period is over, approve the remaining 
+    // amount and delete the stake position
+    if(waitedTime >= releaseTime) {
+      claimableAmount = info.stakedAmount;
+    }
+    else {
+      claimableAmount = (info.stakedAmount * waitedTime) / releaseTime;
+    }
+
+    require(splash20Contract.increaseAllowance(msg.sender, claimableAmount - info.claimedAmount),
+      "Token approve failed");
+    
+    userToStakeInfo[msg.sender].claimedAmount = claimableAmount;
+    userToStakeInfo[msg.sender].lastClaim = uint48(block.timestamp);
+  }
+
+  function claimStakingReward() external {
+
 
   }
 }
