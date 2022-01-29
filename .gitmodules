@@ -1,3 +1,6 @@
 [submodule "/home/zet/dev/solidity/splash-core/lib/ds-test"]
 	path = /home/zet/dev/solidity/splash-core/lib/ds-test
 	url = https://github.com/dapphub/ds-test
+[submodule "/home/zet/dev/solidity/splash-core/lib/openzeppelin-contracts"]
+	path = /home/zet/dev/solidity/splash-core/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
