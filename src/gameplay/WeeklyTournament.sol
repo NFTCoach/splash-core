@@ -42,6 +42,8 @@ contract WeeklyTournament is Ownable, MatchMaker {
   uint48 constant TOURNAMENT_INTERVAL = 0 seconds;
   uint256 constant TIME_CAP = 4 weeks;
 
+  uint8   private _firstWeight = 7;
+  uint8   private _secondWeight = 3;
   uint128 private _tournamentNonce;
 
   event TournamentRegistration  (address user, Pass pass);
@@ -66,6 +68,16 @@ contract WeeklyTournament is Ownable, MatchMaker {
   }
 
   constructor(IRegistry registryAddress) MatchMaker(registryAddress) { }
+
+  // ############## SETTERS ############## //
+
+  function setFirstWeight(uint8 newWeight) external onlyOwner {
+    _firstWeight = newWeight;
+  }
+
+  function setSecondWeight(uint8 newWeight) external onlyOwner {
+    _secondWeight = newWeight;
+  }
 
   // ############## TOURNAMENT CREATION ############## //
   
@@ -114,19 +126,17 @@ contract WeeklyTournament is Ownable, MatchMaker {
     registry.management().lockDefaultFive(msg.sender);
   }
   
-  // TODO: leave tournament queue
 
   function requestTournamentRandomness() external onlyCore {
     registry.rng().requestBlockRandom(msg.sender);
   }
 
 
-  function createTournaments(Pass pass) external {
+  function createTournaments(Pass pass) external onlyCore {
 
     TournamentRegistry storage tReg = passToRegistry[pass];
     require(tReg.active, "Registration is not started yet");
     require(tReg.tournamentCount > 0, "Not enough players to assign");
-    require(registry.core(msg.sender), "Not core");
 
     tReg.active = false;
 
@@ -134,7 +144,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
     registry.rng().checkBlockRandom(msg.sender);
     // It'll revert if there's no random number
     uint256 tournamentRandomness = registry.rng().getBlockRandom(msg.sender);
-
+    
     // Divide the player pool into individual tournaments
     uint256 tournamentCount = tReg.tournamentCount;
     uint16 playerLimit = uint16(2**tReg.matchCount);
@@ -152,6 +162,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
       });
 
       emit TournamentCreated(_tournamentNonce, pass);
+
 
       // Get a list of indexes for each tournament
       // Something like [ 0,1,2,3,4,5,..,15 ]
@@ -174,12 +185,15 @@ contract WeeklyTournament is Ownable, MatchMaker {
         delete idxList[randIdx];
       }
 
-      delete idxList;
+      delete idxList; // This might be pointless
     }
   }
 
 
-  // We're agnostic to which tier this tournament is in
+  /**
+    @notice Plays a single round of a tournament
+    @dev Only core can call it
+  */
   function playTournamentRound(uint128 tournamentId) external onlyCore {
 
     Tournament memory tournament = idToTournament[tournamentId];
@@ -217,6 +231,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
       idToTournament[tournamentId].k += 1;
       idToTournament[tournamentId].j += 2;
     }
+
     // Use idToTournament[...]. to access mutated fields
     // Use tournament to access unchanged fields
     // TODO: gas golf
@@ -227,7 +242,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
       emit TournamentFinished(tournamentId);
     }
 
-      registry.rng().resetBlockRandom(msg.sender);
+    registry.rng().resetBlockRandom(msg.sender);
   }
 
   function finishTournament(uint128 tournamentId) external onlyCore {
@@ -244,8 +259,8 @@ contract WeeklyTournament is Ownable, MatchMaker {
     int128 firstCoeff = registry.staking().getCoefficient(first);
     int128 secondCoeff = registry.staking().getCoefficient(second);
 
-    uint256 winnerPrize = (firstCoeff.mulu(7) * totalPrize) / 
-      (firstCoeff.mulu(7) + secondCoeff.mulu(3));
+    uint256 winnerPrize = (firstCoeff.mulu(_firstWeight) * totalPrize) / 
+      (firstCoeff.mulu(_firstWeight) + secondCoeff.mulu(_secondWeight));
 
     assert(winnerPrize < totalPrize);
 
