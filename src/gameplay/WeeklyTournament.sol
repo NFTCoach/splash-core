@@ -7,8 +7,6 @@ import "./MatchMaker.sol";
 import "../interfaces/IRegistry.sol";
 import "../utils/ABDKMath64x64.sol";
 
-// TODO: add checks to elim fraudulent entries
-
 struct Tournament {
   uint8 matchCount;
   uint16 j;
@@ -23,7 +21,6 @@ struct TournamentRegistry {
   uint8 matchCount;
   uint16 playerCount;
   uint48 deadline;
-  uint48 lastEntry;
   uint64 tournamentCount;
   uint128 lastId;
   uint256 prizePool;
@@ -31,10 +28,13 @@ struct TournamentRegistry {
 
 struct UserRegistry {
   bool registered;
-  Pass pass;
-  uint48 entry;
 }
 
+/**
+  @title WeeklyTournaments
+
+  @author Hamza Karabag
+*/
 contract WeeklyTournament is Ownable, MatchMaker {
   using ABDKMath64x64 for int128;
   /* IRegistry registry from MatchMaker */
@@ -81,6 +81,15 @@ contract WeeklyTournament is Ownable, MatchMaker {
 
   // ############## TOURNAMENT CREATION ############## //
   
+  /**
+    == ONLY CORE ==
+
+    @notice Starts tournament registration for a certain pass
+    @param pass _
+    @param deadline timestamp until when users can register
+    @param matchCount of tournament
+    @param prizePool of tournament
+  */
   function startTournamentRegistration( 
     Pass pass, 
     uint48 deadline, 
@@ -100,6 +109,12 @@ contract WeeklyTournament is Ownable, MatchMaker {
   }
 
 
+  /**
+    @notice Enters the queue for a tournament
+    @param pass Each tournament has a pass, indicating some of its props
+
+    @dev Management contract checks msg.sender's players to ensure they are eligible
+  */
   function enterTournamentQueue(Pass pass) external checkStarters {
 
     TournamentRegistry storage tReg = passToRegistry[pass];
@@ -112,13 +127,12 @@ contract WeeklyTournament is Ownable, MatchMaker {
     Pass currentPass = registry.staking().getPass(msg.sender);
     require(pass == currentPass, "User doesn't have the right pass");
 
-    userToRegistry[msg.sender] = UserRegistry(true, pass, _now());
+    userToRegistry[msg.sender] = UserRegistry(true);
     passToQueue[pass][tReg.playerCount++] = msg.sender;
 
     uint256 playerLimit = 2 ** tReg.matchCount;
     if(tReg.playerCount % playerLimit == playerLimit - 1) {
       tReg.tournamentCount++;
-      tReg.lastEntry = _now();
     }
     
     // This will revert if starters aren't ready
@@ -126,12 +140,23 @@ contract WeeklyTournament is Ownable, MatchMaker {
     registry.management().lockDefaultFive(msg.sender);
   }
   
+  /**
+    == ONLY CORE ==
 
+    @dev Sets a checkpoint for the RNG algorithm we use
+  */
   function requestTournamentRandomness() external onlyCore {
     registry.rng().requestBlockRandom(msg.sender);
   }
 
 
+  /**
+    == ONLY CORE ==
+
+    @notice Creates tournaments after registration
+    @param pass Each tournament has a pass, indicating some of its props
+    @dev Core user can create tournaments before the deadline is finished
+  */
   function createTournaments(Pass pass) external onlyCore {
 
     TournamentRegistry storage tReg = passToRegistry[pass];
@@ -191,8 +216,11 @@ contract WeeklyTournament is Ownable, MatchMaker {
 
 
   /**
+    == ONLY CORE ==
+
     @notice Plays a single round of a tournament
-    @dev Only core can call it
+    @param tournamentId Each tournament has an ID
+
   */
   function playTournamentRound(uint128 tournamentId) external onlyCore {
 
@@ -245,6 +273,21 @@ contract WeeklyTournament is Ownable, MatchMaker {
     registry.rng().resetBlockRandom(msg.sender);
   }
 
+  /**
+    == ONLY CORE ==
+
+    @notice Ends a tournament
+    @param tournamentId _
+
+    @dev Winner prize is calculating using 
+      Prize = TotalPrize * m*A / (m*A + n*B) where:
+      m: Prize weight of 1st place
+      n: Prize weight of 2nd place
+      A: Stake coefficient of 1st user
+      B: Stake coefficeient of 2nd user
+
+    @dev Second prize is basically (Total prize - Winner prize)
+  */
   function finishTournament(uint128 tournamentId) external onlyCore {
     Tournament memory tournament = idToTournament[tournamentId];
 

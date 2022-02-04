@@ -37,13 +37,11 @@ struct TournamentRegistration {
   uint16 tournamentCount;
   uint16 maxTournamentCount;
   uint48 entryDeadline;
-  uint48 lastEntry;
   TournamentDetails details;
 }
 
 struct UserRegistration {
   bool registered;
-  uint48 entryTimestamp;
 }
 
 /**
@@ -117,14 +115,12 @@ contract PaidTournaments is Ownable, MatchMaker {
     require(!userToRegistry[msg.sender].registered, "Player already registered");
     
 
-    userToRegistry[msg.sender] = UserRegistration(true, _now());
+    userToRegistry[msg.sender] = UserRegistration(true);
     typeToQueue[tournamentType][tReg.playerCount++] = msg.sender;
 
     uint256 playerLimit = 2 ** tReg.details.matchCount;
     if(tReg.playerCount % playerLimit == playerLimit - 1) {
       tReg.tournamentCount++;
-      tReg.lastEntry = _now();
-
       emit TournamentFull(tournamentType);
     }
 
