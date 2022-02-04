@@ -121,7 +121,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
   }
 
 
-  function assignTournamentUsers(Pass pass) external {
+  function createTournaments(Pass pass) external {
 
     TournamentRegistry storage tReg = passToRegistry[pass];
     require(tReg.active, "Registration is not started yet");
@@ -136,30 +136,48 @@ contract WeeklyTournament is Ownable, MatchMaker {
     uint256 tournamentRandomness = registry.rng().getBlockRandom(msg.sender);
 
     // Divide the player pool into individual tournaments
-    // TODO: randomize
     uint256 tournamentCount = tReg.tournamentCount;
-    uint256 playerLimit = 2**tReg.matchCount;
-    for (uint256 i = 0; i < tournamentCount; i++) {
+    uint16 playerLimit = uint16(2**tReg.matchCount);
+    for (uint128 i = 0; i < tournamentCount; i++) {
       _tournamentNonce++;
 
       // Register the tournament
       idToTournament[_tournamentNonce] = Tournament({
         matchCount: tReg.matchCount,
         j: 0,
-        k: uint16(playerLimit),
+        k: playerLimit,
         start: tReg.deadline,
         interval: TOURNAMENT_INTERVAL,
         prizePool: tReg.prizePool / tournamentCount
       });
 
-      for (uint16 j = 0; j < 2**playerLimit; j++) {
-        tournamentToPlayers[_tournamentNonce][j] = 
-          passToQueue[pass][uint16(i*playerLimit + j)];
+      emit TournamentCreated(_tournamentNonce, pass);
+
+      // Get a list of indexes for each tournament
+      // Something like [ 0,1,2,3,4,5,..,15 ]
+      uint16[] memory idxList;
+      for (uint16 j = 0; j < playerLimit; j++)
+        idxList[j] = j;
+
+      // Pick a random index from the list,
+      // Assign the next player to this random tournament slot
+      // Repeat until index list is empty
+      // This should randomize a single tournament's game order
+      for (uint16 size = playerLimit; size > 0; size--) {
+        uint256 randIdx = tournamentRandomness % size - 1;
+        uint16 tSlot = idxList[randIdx];
+
+        tournamentToPlayers[_tournamentNonce][tSlot] = 
+          passToQueue[pass][uint16((i+1) * playerLimit - size)]; 
+      
+        // Remove the index from the list
+        delete idxList[randIdx];
       }
 
-      emit TournamentCreated(_tournamentNonce, pass);
+      delete idxList;
     }
   }
+
 
   // We're agnostic to which tier this tournament is in
   function playTournamentRound(uint128 tournamentId) external onlyCore {

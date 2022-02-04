@@ -46,6 +46,11 @@ struct UserRegistration {
   uint48 entryTimestamp;
 }
 
+/**
+  @title Paid Tournament
+  @notice Ticket based tournaments which can have ERC20/ERC721/ERC1155 prizes
+  @author Hamza Karabag
+*/
 contract PaidTournaments is Ownable, MatchMaker {
   /* IRegistry registry from MatchMaker */
 
@@ -82,7 +87,11 @@ contract PaidTournaments is Ownable, MatchMaker {
 
   // Register
 
-  function startTournamentRegistration(TournamentDetails memory details, uint48 deadline, uint16 maxTournamentCount) external onlyCore {
+  function startTournamentRegistration(
+    TournamentDetails memory details,
+    uint48 deadline, 
+    uint16 maxTournamentCount
+  ) external onlyCore {
 
     _tournamentTypeNonce++;
     TournamentRegistration storage tReg = typeToRegistry[_tournamentTypeNonce];

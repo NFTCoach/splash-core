@@ -17,5 +17,5 @@ interface IRegistry {
   function management() external view returns(IManagement);
 
   function core(address user) external view returns(bool); 
-  function authorized(address user) external view returns(bool); 
+  function authorized(address contractAddress) external view returns(bool); 
 }
