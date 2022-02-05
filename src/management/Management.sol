@@ -7,9 +7,7 @@ import "oz-contracts/access/Ownable.sol";
 import "../utils/Errors.sol";
 import "../interfaces/IRegistry.sol";
 
-// TODO: Non-bundle way of selling things that is exposed to owner only
-
-contract Management is Ownable {
+contract Management is Ownable, IManagement {
   using EnumerableSet for EnumerableSet.UintSet;
 
   IRegistry registry;
@@ -53,7 +51,7 @@ contract Management is Ownable {
         if (i == j) {
           continue;
         } else if (arr[i] == arr[j] && arr[i] != 0) {
-          require(false, "Duplicate players");
+          require(false, Errors.DUP_PLAYER);
         }
       }
     }
@@ -61,7 +59,7 @@ contract Management is Ownable {
   }
 
   modifier authorized() {
-    require(registry.authorized(msg.sender), "Not authorized");
+    require(registry.authorized(msg.sender), Errors.NOT_AUTHORIZED);
     _;
   }
 
@@ -131,7 +129,7 @@ contract Management is Ownable {
   */
   function registerTeam() external {
     
-    require(!userToTeam[msg.sender].initialized, "Team is not set");
+    require(!userToTeam[msg.sender].initialized, Errors.TEAM_NOT_INIT);
 
     userToTeam[msg.sender] = Team({
       initialized: true,
@@ -331,17 +329,17 @@ contract Management is Ownable {
     during tournaments
   */
   function substituteLocked(uint256 idx, uint256 newPlayer) external {
-    require(newPlayer != 0, "Player is not valid");
+    require(newPlayer != 0, Errors.INVALID_PLAYER);
 
     // Checking first player's locked fields to see if in tournament
     require(
       idToPlayer[userToTeam[msg.sender].defaultFive[0]].locked,
-      "Only callable in tournament"
+      Errors.CALLABLE_IN_TOURNAMENT
     );
 
     uint256[5] memory defaultFive = userToTeam[msg.sender].defaultFive;
     for (uint256 i = 0; i < 5; i++) {
-      require(defaultFive[i] != newPlayer, "Duplicate player");
+      require(defaultFive[i] != newPlayer, Errors.DUP_PLAYER);
     }
 
     idToPlayer[defaultFive[idx]].locked = false;
@@ -355,12 +353,12 @@ contract Management is Ownable {
     @notice Getter function for retrieving a coach's team
     @dev Checks if team is initialized FIXME (Not sure about this one)
   */
-  function getTeamOf(address user) external view returns (Team memory) {
+  function getTeamOf(address user) external view override returns (Team memory) {
     require(userToTeam[user].initialized, "");
     return userToTeam[user];
   }
 
-  function checkStarters(address user) external view {
+  function checkStarters(address user) external view override {
     _checkStarters(user, 1, 0);
   }
 
@@ -368,7 +366,7 @@ contract Management is Ownable {
     address user,
     uint256 matchCount,
     uint48 endTime
-  ) external view {
+  ) external view override {
     _checkStarters(user, matchCount, endTime);
   }
 
@@ -437,7 +435,7 @@ contract Management is Ownable {
       - Player is locked (in tournament)
       - Caller and coach matches (aka if it's already rented)
   */
-  function checkForSale(address user, uint256 playerId) external view {
+  function checkForSale(address user, uint256 playerId) external view override {
     require(!_inDefaultFive(playerId), "");
     require(!idToPlayer[playerId].locked, "");
     require(idToCoach[playerId] == user, "");
@@ -453,22 +451,77 @@ contract Management is Ownable {
     blocking this function in the process. In order not to make more external calls
     we are passing this responsibility to the front-end.
   */
-  function checkForBuy(address user, uint256 playerId) external view {
+  function checkForBuy(address user, uint256 playerId) external view override {
     require(!_inDefaultFive(playerId), "");
     require(!idToPlayer[playerId].locked, "");
     require(idToCoach[playerId] != user, "");
   }
 
-  function lockDefaultFive(address user) external authorized {
+  function lockDefaultFive(address user) external override authorized {
     
     for (uint256 i = 0; i < 5; i++) {
       uint256 playerId = userToTeam[user].defaultFive[i];
-
       idToPlayer[playerId].locked = true;
     }
   }
 
-  function unlockDefaultFive(address user) external authorized {
+  function lockVeteranBatch(
+    address user, 
+    uint256[] calldata ids
+  ) external override authorized {
+
+    for (uint256 i = 0; i < ids.length; i++) {
+      Player storage player = idToPlayer[ids[i]];
+      require(idToCoach[ids[i]] == user, Errors.NOT_COACH);
+      require(!player.locked, Errors.PLAYER_LOCKED);
+      require(player.status == 1 && player.leftToExpire > 0, Errors.PLAYER_NOT_VETERAN);
+
+      player.locked = true;
+    }
+  }
+
+  function lockRetiredBatch(
+    address user,
+    uint256[] calldata ids
+  ) external override authorized {
+
+    for(uint256 i = 0; i < ids.length; i++) {
+      Player storage player = idToPlayer[ids[i]];
+      require(idToCoach[ids[i]] == user, Errors.NOT_COACH);
+      require(!player.locked, Errors.PLAYER_LOCKED);
+      require(player.status == 1 && player.leftToExpire == 0, Errors.PLAYER_NOT_RETIRED);
+
+      player.locked = true;
+    }
+  }
+
+  function unlockVeteranBatch(
+    address user,
+    uint256[] calldata ids
+  ) external override authorized {
+
+    for(uint256 i = 0; i < ids.length; i++) {
+      Player storage player = idToPlayer[ids[i]];
+      require(idToCoach[ids[i]] == user, Errors.NOT_COACH);
+      require(player.locked, Errors.PLAYER_NOT_LOCKED);
+      player.locked = false;
+    }
+  }
+
+  function unlockRetiredBatch(
+    address user,
+    uint256[] calldata ids
+  ) external override authorized {
+
+    for(uint256 i = 0; i < ids.length; i++) {
+      Player storage player = idToPlayer[ids[i]];
+      require(idToCoach[ids[i]] == user, Errors.NOT_COACH);
+      require(player.locked, Errors.PLAYER_NOT_LOCKED);
+      player.locked = false;
+    }
+  }
+
+  function unlockDefaultFive(address user) external override authorized {
     
     for (uint256 i = 0; i < 5; i++) {
       uint256 playerId = userToTeam[user].defaultFive[i];
@@ -493,7 +546,7 @@ contract Management is Ownable {
     uint256 nthField,
     uint24 atkAmount,
     uint24 defAmount
-  ) external authorized {
+  ) external override authorized {
 
     uint256[5] memory players = userToTeam[user].defaultFive;
 
@@ -508,7 +561,7 @@ contract Management is Ownable {
     }
   }
 
-  function afterTraining(address user, bool won) external authorized {
+  function afterTraining(address user, bool won) external override authorized {
     
     Team storage team = userToTeam[user];
     require(team.initialized, "");
@@ -542,7 +595,7 @@ contract Management is Ownable {
   /**
     @notice Updates legendary players' deadlines after tournament round
   */
-  function afterTournamentRound(address userOne, address userTwo) external authorized {
+  function afterTournamentRound(address userOne, address userTwo) external override authorized {
     
     uint256[5] memory startersOne = userToTeam[userOne].defaultFive;
     uint256[5] memory startersTwo = userToTeam[userTwo].defaultFive;
@@ -564,7 +617,7 @@ contract Management is Ownable {
     address to,
     uint256 playerId,
     uint48 duration
-  ) external authorized {
+  ) external override authorized {
     
     require(registry.sp721().ownerOf(playerId) == from, "");
     require(idToCoach[playerId] == from, "");
@@ -579,7 +632,7 @@ contract Management is Ownable {
     address from,
     address to,
     uint256 playerId
-  ) external authorized {
+  ) external override authorized {
     
     require(from == idToCoach[playerId] || from == address(0), "");
     require(!idToPlayer[playerId].locked, "");
@@ -614,7 +667,7 @@ contract Management is Ownable {
     Attack score  =     [6*SOAS(a,b,c) + 3SOAS(c,d,e)] / 160 + 25000
     Defence score =     [6*SODS(c,d,e) + 3SODS(c,d,e)] / 160 + 25000
   */
-  function getAtkAndDef(address user) external view returns (uint256, uint256) {
+  function getAtkAndDef(address user) external view override returns (uint256, uint256) {
     
     uint256 mainScore = 0;
     uint256 secondaryScore = 0;

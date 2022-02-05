@@ -11,16 +11,9 @@ import "../interfaces/IRegistry.sol";
 
 enum StakeStatus { NONE, ENTERED, EXITED }
 
-struct PassRequirement {
-  uint8 veteranCount;
-  uint8 retiredCount;
-  uint48 stakeTime;
-  uint256 stakeAmount;
-}
-
 struct StakeInfo {
   StakeStatus status;
-  Pass pass;
+  uint8 pass;
   uint48 stakeTime;
   uint48 enteredAt;
   uint48 exitedAt;
@@ -29,8 +22,6 @@ struct StakeInfo {
   uint256 lateClaimAmount;
   uint256 lastStakeReward;
   uint256 pendingStakeRewards;
-  uint256[] veteranList;
-  uint256[] retiredList;
 }
 
 /**
@@ -39,7 +30,7 @@ struct StakeInfo {
   @dev    Passes are used to enter tournaments w/o tickets
   @author Hamza Karabag
 */
-contract Staking is Ownable {
+contract Staking is Ownable, IStaking {
   using ABDKMath64x64 for int128;
   using ABDKMath64x64 for uint256;
 
@@ -55,25 +46,25 @@ contract Staking is Ownable {
   // Max Time Rate: 2.2
   int128 public maxTimeRate = uint256(11).divu(5);
 
-  event RewardChanged(uint256 newRewardRate);
-  event MaxStakeRateChanged(int128 newStakeRate);
-  event MaxTimeRateChanged(int128 newTimeRate);
+  event RewardChanged           (uint256 newRewardRate);
+  event MaxStakeRateChanged     (int128 newStakeRate);
+  event MaxTimeRateChanged      (int128 newTimeRate);
+  event PassRequirementChanged  (uint8 pass);
 
-  mapping(Pass => PassRequirement)  public passRequirements;
-  mapping(address => StakeInfo)     public userToStakeInfo;
+  // Passes start from 1
+  mapping(uint8 => PassRequirement)  public passRequirements;
+  mapping(address => StakeInfo)      public userToStakeInfo;
 
   constructor(
     IRegistry registryAddress, 
     uint256 initialRewardRate, 
     PassRequirement[] memory initialRequirements 
   ) {
-    require(initialRequirements.length == 3, "Invalid number of requirements");
-      
     registry = IRegistry(registryAddress);
 
     rewardRate = initialRewardRate;
-    for (uint256 i = 0; i <= initialRequirements.length; i++) {
-      passRequirements[Pass(i + 1)] = initialRequirements[i];
+    for (uint8 i = 0; i <= initialRequirements.length; i++) {
+      passRequirements[i + 1] = initialRequirements[i];
     }
   }
 
@@ -84,7 +75,7 @@ contract Staking is Ownable {
     emit RewardChanged(newRewardRate);
   }
 
-  function setMaxStakeRate(int128 newRate) external onlyOwner{
+  function setMaxStakeRate(int128 newRate) external onlyOwner {
     maxStakeRate = newRate;
     emit MaxStakeRateChanged(newRate);
   }
@@ -92,6 +83,19 @@ contract Staking is Ownable {
   function setMaxTimeRate(int128 newRate) external onlyOwner {
     maxTimeRate = newRate;
     emit MaxStakeRateChanged(newRate);
+  }
+
+  function setPass(uint8 pass, PassRequirement calldata requirements) external onlyOwner {
+    passRequirements[pass] = requirements;
+    emit PassRequirementChanged(pass);
+  }
+
+  function setPassRequirement(
+    uint8 pass, 
+    PassRequirement calldata newRequirements
+  ) external onlyOwner {
+    passRequirements[pass] = newRequirements;
+    emit PassRequirementChanged(pass);
   }
 
   // #################### COEFFICENT #################### //
@@ -123,10 +127,14 @@ contract Staking is Ownable {
 
   // #################### PASS #################### //
 
-  function getPass(address user) external view returns(Pass) {
+  function getPass(address user) external view override returns(uint8 pass) {
     return userToStakeInfo[user].pass;
   }
 
+  function getPassRequirements(uint8 pass) external view override 
+    returns(PassRequirement memory requirements) {
+      return passRequirements[pass];
+  }
   // #################### STAKING #################### //
 
   /**
@@ -164,11 +172,9 @@ contract Staking is Ownable {
   } 
 
   function enterStake(
-    Pass pass, 
+    uint8 pass, 
     uint256 stakeAmount, 
-    uint48 stakeTime,
-    uint256[] memory veteranList,
-    uint256[] memory retiredList
+    uint48 stakeTime
   ) external {
     _updateRewards();
 
@@ -184,15 +190,9 @@ contract Staking is Ownable {
     info.pass = pass;
     info.stakeTime = stakeTime;
     info.stakeAmount = stakeAmount;
-    info.veteranList = veteranList;
-    info.retiredList = retiredList;
     info.enteredAt = uint48(block.timestamp);
   
     totalStaked += stakeAmount;
-
-    IManagement management = registry.management();
-    management.lockVeteranBatch(msg.sender, veteranList);
-    management.lockRetiredBatch(msg.sender, retiredList);
   }
 
   function exitStake() external {
@@ -220,11 +220,6 @@ contract Staking is Ownable {
     info.lateClaimedAt = uint48(block.timestamp);
     info.lateClaimAmount = 0;
     info.pendingStakeRewards = 0;
-
-    // Unlock staked players
-    IManagement management = registry.management();
-    management.unlockVeteranBatch(msg.sender, info.veteranList);
-    management.unlockRetiredBatch(msg.sender, info.retiredList);
 
     // Approve stake rewards
     _approveSplash(msg.sender, pendingStakeRewards);

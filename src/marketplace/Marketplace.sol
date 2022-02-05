@@ -3,6 +3,7 @@ pragma solidity 0.8.10;
 
 import "oz-contracts/access/Ownable.sol";
 
+import "../utils/Errors.sol";
 import "../interfaces/IRegistry.sol";
 
 /**
@@ -33,6 +34,11 @@ struct CardListing {
   uint256 price;
 }
 
+struct CardPrice {
+  bool active;
+  uint256 price;
+}
+
 /**
   @title Marketplace
   @notice Buy, sell, rent functions related to marketplace
@@ -47,12 +53,11 @@ contract Marketplace is Ownable {
 
   mapping(uint256 => Listing) public idToListing;
   mapping(uint256 => CardListing) public idToCardListing;
+  mapping(uint256 => CardPrice) public idToPrice;
 
   // To keep track of how much of one user's cards are listed
   mapping(address => mapping(uint256 => uint256)) listingCounts;
 
-  // It is assumed frontends cache the listing information and update the cache
-  // by listening to these events
   event PlayerListed(uint256 indexed playerId);
   event PlayerPriceChange(uint256 indexed playerId);
   event PlayerListedForRent(uint256 indexed playerId);
@@ -74,6 +79,14 @@ contract Marketplace is Ownable {
   /** @dev Setter for _commission */
   function setCommission(uint128 newCommission) external onlyOwner {
     _commission = newCommission;
+  }
+
+  function setCardPrice(uint256 id, uint256 newPrice) external onlyOwner {
+    idToPrice[id] = CardPrice(true, newPrice);
+  }
+
+  function unsetCardPrice(uint256 id) external onlyOwner {
+    delete idToPrice[id];
   }
 
   // ############## LIST PLAYER ############## //
@@ -308,5 +321,16 @@ contract Marketplace is Ownable {
       cardListing.amount,
       ""
     );
+  }
+
+  function buyCardFromSale(uint256 id, uint256 amount) external {
+
+    require(idToPrice[id].active, Errors.SALE_NOT_ACTIVE);
+    require(
+      registry.sp20().transferFrom(msg.sender, address(this), idToPrice[id].price * amount), 
+      Errors.TOKEN_CHECKOUT_FAIL
+    );
+
+    registry.sp1155().mint(msg.sender, id, amount, "");
   }
 }

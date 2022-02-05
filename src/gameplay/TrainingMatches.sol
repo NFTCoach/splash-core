@@ -4,6 +4,7 @@ pragma solidity 0.8.10;
 import "oz-contracts/access/Ownable.sol";
 
 import "./MatchMaker.sol";
+import "../utils/Errors.sol";
 import "../interfaces/IRegistry.sol";
 
 contract TrainingMatches is Ownable, MatchMaker {
@@ -58,7 +59,7 @@ contract TrainingMatches is Ownable, MatchMaker {
     @dev Requires each player in the defaultFive to be ready (Management.checkStarters)
   */
   function requestTrainingRandomness(address opponent) external checkStarters {
-    require(opponent != address(0), "Zero address");
+    require(opponent != address(0), Errors.ZERO_ADDRESS);
 
     _opponents[msg.sender] = opponent;
     registry.rng().requestBlockRandom(msg.sender);
@@ -74,7 +75,7 @@ contract TrainingMatches is Ownable, MatchMaker {
     @dev Drops a upgrade card with a 0.1% percent chance and emits UpgradeCardDropped
   */
   function train() external checkStarters {
-    require(_opponents[msg.sender] != address(0), "Zero address");
+    require(_opponents[msg.sender] != address(0), Errors.ZERO_ADDRESS);
 
     // Generate the random
     registry.rng().checkBlockRandom(msg.sender);

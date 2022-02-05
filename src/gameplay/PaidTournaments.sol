@@ -9,6 +9,7 @@ import "oz-contracts/token/ERC721/ERC721.sol";
 import "oz-contracts/token/ERC1155/ERC1155.sol";
 
 import "./MatchMaker.sol";
+import "../utils/Errors.sol";
 import "../interfaces/IRegistry.sol";
 
 enum Reward { ERC20, ERC721, ERC1155 }
@@ -60,7 +61,7 @@ contract PaidTournaments is Ownable, MatchMaker {
 
   event NewTournament           (uint128 tournamentType);
   event TournamentRegistered    (address user, uint128 tournamentType);
-  event TournamentFull          (uint128 tournamentType);
+  event TournamentFull          (uint128 tournamentType, uint16 tournamentIndex);
   event TournamentCreated       (uint128 tournamentId, uint128 tournamentType);
   event TournamentFinished      (uint128 tournamentId);
 
@@ -71,7 +72,7 @@ contract PaidTournaments is Ownable, MatchMaker {
   mapping(address => UserRegistration)            private userToRegistry;
 
   modifier onlyCore() {
-    require(registry.core(msg.sender), "Core only");
+    require(registry.core(msg.sender), Errors.NOT_CORE);
     _;
   }
 
@@ -87,6 +88,7 @@ contract PaidTournaments is Ownable, MatchMaker {
 
   function startTournamentRegistration(
     TournamentDetails memory details,
+    uint8 cost,
     uint48 deadline, 
     uint16 maxTournamentCount
   ) external onlyCore {
@@ -94,9 +96,10 @@ contract PaidTournaments is Ownable, MatchMaker {
     _tournamentTypeNonce++;
     TournamentRegistration storage tReg = typeToRegistry[_tournamentTypeNonce];
     
-    require(!tReg.active, "Registration is already started");
-    require(deadline > _now(), "Invalid deadline");
+    require(!tReg.active, Errors.REG_STARTED);
+    require(deadline > _now(), Errors.INVALID_DEADLINE);
     
+    tReg.cost = cost;
     tReg.active = true;
     tReg.details = details;
     tReg.entryDeadline = deadline;
@@ -109,19 +112,18 @@ contract PaidTournaments is Ownable, MatchMaker {
 
     TournamentRegistration storage tReg = typeToRegistry[tournamentType];
 
-    require(tReg.active, "Registration is not active");
-    require(tReg.tournamentCount > tReg.maxTournamentCount, "Tournament limit reached");
-    require(tReg.entryDeadline >= _now(), "Late for entering queue");
-    require(!userToRegistry[msg.sender].registered, "Player already registered");
-    
+    require(tReg.active, Errors.REG_NOT_STARTED);
+    require(tReg.tournamentCount > tReg.maxTournamentCount, Errors.TOURNAMENT_LIMIT);
+    require(tReg.entryDeadline >= _now(), Errors.LATE_FOR_QUEUE);
+    require(!userToRegistry[msg.sender].registered, Errors.ALREADY_REGISTERED);
 
     userToRegistry[msg.sender] = UserRegistration(true);
     typeToQueue[tournamentType][tReg.playerCount++] = msg.sender;
 
     uint256 playerLimit = 2 ** tReg.details.matchCount;
     if(tReg.playerCount % playerLimit == playerLimit - 1) {
+      emit TournamentFull(tournamentType, tReg.tournamentCount);
       tReg.tournamentCount++;
-      emit TournamentFull(tournamentType);
     }
 
     // Burn the tickets necessary to play
@@ -140,46 +142,38 @@ contract PaidTournaments is Ownable, MatchMaker {
     registry.rng().requestBlockRandom(msg.sender);
   }
 
-  // This function will be a gas guzzler
-  function assignTournamentUsers(uint128 tournamentType) external onlyCore {
-    
+  function createTournament(uint128 tournamentType, uint16 tournamentIndex) external onlyCore {
+
     TournamentRegistration storage tReg = typeToRegistry[tournamentType];
-    require(tReg.active, "Registration is not started yet");
-    require(tReg.tournamentCount > 0, "Not enough players to assign");
-    require(registry.core(msg.sender), "Not core");
+    require(tReg.active, Errors.REG_NOT_STARTED);
+    require(tReg.tournamentCount > 0, Errors.NO_TOURNAMENTS);
 
-    tReg.active = false;
+    uint16 playerLimit = uint16(2**tReg.details.matchCount);
 
-    uint256 tournamentCount = tReg.tournamentCount;
-    uint256 playerLimit = 2**tReg.details.matchCount;
+    _tournamentNonce++;
 
-    for (uint256 i = 0; i < tournamentCount; i++) {
-      _tournamentNonce++;
+    // Register the tournament
+    idToTournament[_tournamentNonce] = Tournament({
+      active:     true,
+      j:          0,
+      k:          playerLimit,
+      start:      tReg.entryDeadline,
+      interval:   TOURNAMENT_INTERVAL,
+      details:    tReg.details
+    });
 
-      // Register the tournament
-      idToTournament[_tournamentNonce] = Tournament({
-        active:     true,
-        j:          0,
-        k:          uint16(playerLimit),
-        start:      tReg.entryDeadline,
-        interval:   TOURNAMENT_INTERVAL,
-        details:    tReg.details
-      });
-
-      for (uint16 j = 0; j < 2**playerLimit; j++) {
-        tournamentToPlayers[_tournamentNonce][j] = 
-          typeToQueue[tournamentType][uint16(i*playerLimit + j)];
-      }
-
-      emit TournamentCreated(_tournamentNonce, tournamentType);
+    for (uint16 j = 0; j < 2**playerLimit; j++) {
+      tournamentToPlayers[_tournamentNonce][j] = 
+        typeToQueue[tournamentType][tournamentIndex * playerLimit + j];
     }
-  }
 
+    emit TournamentCreated(_tournamentNonce, tournamentType);
+  }
 
   function playTournamentRound(uint128 tournamentId) external onlyCore {
 
     Tournament memory tournament = idToTournament[tournamentId];
-    require(_now() > tournament.start, "Next match not ready");
+    require(_now() > tournament.start, Errors.NEXT_MATCH_NOT_READY);
 
     registry.rng().checkBlockRandom(msg.sender);
     // Reverts if no random
@@ -230,7 +224,7 @@ contract PaidTournaments is Ownable, MatchMaker {
     
     Tournament memory tournament = idToTournament[tournamentId];
 
-    require(tournament.k == (2**tournament.details.matchCount) * 2 - 1, "Tournament not finished");
+    require(tournament.k == (2**tournament.details.matchCount) * 2 - 1, Errors.TOURNAMENT_NOT_FINISHED);
 
     uint16 winnerIdx = uint16(2**tournament.details.matchCount) * 2 - 2;
     address first = tournamentToPlayers[tournamentId][winnerIdx];
@@ -244,7 +238,7 @@ contract PaidTournaments is Ownable, MatchMaker {
       require(ERC20(rewardAddress).approve({
         spender: first, 
         amount: tournament.details.rewardAmount
-      }), "");
+      }), Errors.TOKEN_APPROVE_FAIL);
     }
     else if(rewardType == Reward.ERC721) {
       ERC721(rewardAddress).safeTransferFrom({

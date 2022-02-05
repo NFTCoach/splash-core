@@ -47,9 +47,6 @@ interface IManagement {
   function getTeamOf(address user) external view returns (Team memory);
   function getAtkAndDef(address user) external view returns (uint256, uint256);
 
-  // 0. Doesn't exist, 1. Rookie, 2. Veteran, 3. Retired 
-  function getPlayerStatus(uint256 user) external view returns(uint256);
-  
   function checkStarters(address user) external view;
   function checkStarters(address user, uint256 matchCount, uint48 endTime) external view;
   function checkForSale(address user, uint256 playerId) external view;

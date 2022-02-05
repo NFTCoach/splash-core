@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.10;
 
+import "../utils/Errors.sol";
 import "../interfaces/IRegistry.sol";
 
 abstract contract MatchMaker {
   IRegistry internal registry;
 
   uint256 constant UPGRADE_AMOUNT = 1000; // 1%
-
-  string constant ERR_TEAM_NOT_INIT = "Team isn't initialized";
 
   constructor(IRegistry registryAddress) {
     registry = IRegistry(registryAddress);
@@ -41,7 +40,7 @@ abstract contract MatchMaker {
     uint256 defUpgrade
   ) {
     Team memory teamOne = registry.management().getTeamOf(playerOne);
-    require(teamOne.initialized, ERR_TEAM_NOT_INIT);
+    require(teamOne.initialized, Errors.TEAM_NOT_INIT);
 
     (uint256 atkOne, uint256 defOne) = registry.management().getAtkAndDef(playerOne);
     (uint256 atkTwo, uint256 defTwo) = registry.management().getAtkAndDef(playerTwo);
