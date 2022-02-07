@@ -1,6 +1,7 @@
 # Splash (Formerly COACH) Contracts
 
 Written using Solidity 0.8.10 with optimizer enable @ runs 1000
+<br>
 Uses [Foundry](https://github.com/gakonst/foundry)
 
 Dependencies:
