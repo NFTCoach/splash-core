@@ -17,11 +17,13 @@ library Errors {
   string constant NO_TOURNAMENTS = "There are no tournaments to assign";
   string constant TOURNAMENT_LIMIT = "Tournament player limit reached";
   string constant TOURNAMENT_NOT_FINISHED = "Tournament isn't finished";
+  string constant TOURNAMENT_EMPTY = "Tournament is empty";
 
   string constant NOT_COACH = "Caller is not coach of player";
   string constant NOT_CORE = "Caller is not a core account";
   string constant NOT_AUTHORIZED = "Caller is not an authorized contract";
   string constant NOT_ENOUGH_PLAYERS_STAKED = "Not enough players staked";
+  string constant NOT_IN_TOURNAMENT = "Caller isn't in the tournament";
 
   string constant NEXT_MATCH_NOT_READY = "Next match is not ready";
 

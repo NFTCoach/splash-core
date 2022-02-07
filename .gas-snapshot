@@ -1,0 +1,4 @@
+PlayerTest:test_mint_player_cards() (gas: 64910)
+PlayerTest:test_open_player_packs() (gas: 782128)
+StakeTest:test_alice_enter_stake() (gas: 128051)
+StakeTest:test_assign_addresses() (gas: 1120)

@@ -7,7 +7,7 @@ import "oz-contracts/access/Ownable.sol";
 import "../utils/Errors.sol";
 import "../interfaces/IRegistry.sol";
 
-contract Management is Ownable, IManagement {
+contract MockManagement is Ownable, IManagement {
   using EnumerableSet for EnumerableSet.UintSet;
 
   IRegistry registry;
@@ -30,6 +30,8 @@ contract Management is Ownable, IManagement {
   uint48 constant VETERAN_MATCH_COUNT = 100;
 
   uint256 trainingInterval = 4 hours;
+
+  uint256[] public createdPlayers;
 
   event AcademyAdded    (uint256 indexed academyId);
   event AcademyRemoved  (uint256 indexed academyId);
@@ -150,9 +152,9 @@ contract Management is Ownable, IManagement {
     @dev Requires the Management to be authorized by RNG
   */
   function requestOpenPackRandomness() external {
-    require(registry.sp1155().balanceOf(msg.sender, 10) > 0, "sp1155 bal");
-    require(userToTeam[msg.sender].initialized, "not init");
-    require(registry.sp721().balanceOf(msg.sender) <= MAX_PLAYER_COUNT, "p count");
+    require(registry.sp1155().balanceOf(msg.sender, 10) > 0, "");
+    require(userToTeam[msg.sender].initialized, "");
+    require(registry.sp721().balanceOf(msg.sender) <= MAX_PLAYER_COUNT, "");
 
     registry.rng().requestChainlinkRandom(msg.sender);
     registry.sp1155().burn(msg.sender, 10, 1);
@@ -163,16 +165,22 @@ contract Management is Ownable, IManagement {
     resets random afterwards
     @dev Requires the Management to be authorized by RNG
   */
-  function openPack() external {
+  function openPack() external returns(uint256[] memory) {
     uint256 randomness = registry.rng().getChainlinkRandom(msg.sender);
     require(randomness != 0, "");
 
+    uint256[] memory playerList = new uint256[](5);
+
     for (uint256 i = 0; i < 5; i++) {
       uint256 playerDigest = uint256(keccak256(abi.encodePacked(randomness, i)));
+      playerList[i] = playerDigest;
+      createdPlayers.push(playerDigest);
       _createPlayer(playerDigest);
     }
 
     registry.rng().resetChainlinkRandom(msg.sender);
+  
+    return playerList;
   }
 
   // ############## PLAYER ############## //

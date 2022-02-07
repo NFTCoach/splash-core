@@ -87,7 +87,7 @@ contract PaidTournaments is Ownable, MatchMaker {
   // Register
 
   function startTournamentRegistration(
-    TournamentDetails memory details,
+    TournamentDetails calldata details,
     uint8 cost,
     uint48 deadline, 
     uint16 maxTournamentCount
@@ -105,6 +105,31 @@ contract PaidTournaments is Ownable, MatchMaker {
     tReg.entryDeadline = deadline;
     tReg.maxTournamentCount = maxTournamentCount;
 
+    Reward rewardType = details.rewardType;
+    if(rewardType == Reward.ERC20) {
+      require(IERC20(details.rewardAddress).transferFrom(
+        msg.sender,
+        address(this),
+        details.rewardAmount
+      ), "Token checkout failed");
+    }
+    else if(rewardType == Reward.ERC721) {
+      IERC721(details.rewardAddress).safeTransferFrom(
+        msg.sender,
+        address(this),
+        details.rewardId
+      );
+    }
+    else if(rewardType == Reward.ERC1155) {
+      IERC1155(details.rewardAddress).safeTransferFrom(
+        msg.sender,
+        address(this),
+        details.rewardId,
+        details.rewardAmount,
+        ""
+      );
+    }
+
     emit NewTournament(_tournamentTypeNonce);
   }
 
@@ -113,18 +138,20 @@ contract PaidTournaments is Ownable, MatchMaker {
     TournamentRegistration storage tReg = typeToRegistry[tournamentType];
 
     require(tReg.active, Errors.REG_NOT_STARTED);
-    require(tReg.tournamentCount > tReg.maxTournamentCount, Errors.TOURNAMENT_LIMIT);
+    require(tReg.tournamentCount < tReg.maxTournamentCount, Errors.TOURNAMENT_LIMIT);
     require(tReg.entryDeadline >= _now(), Errors.LATE_FOR_QUEUE);
     require(!userToRegistry[msg.sender].registered, Errors.ALREADY_REGISTERED);
 
     userToRegistry[msg.sender] = UserRegistration(true);
-    typeToQueue[tournamentType][tReg.playerCount++] = msg.sender;
+    typeToQueue[tournamentType][tReg.playerCount] = msg.sender;
 
     uint256 playerLimit = 2 ** tReg.details.matchCount;
     if(tReg.playerCount % playerLimit == playerLimit - 1) {
       emit TournamentFull(tournamentType, tReg.tournamentCount);
       tReg.tournamentCount++;
     }
+
+    tReg.playerCount++;
 
     // Burn the tickets necessary to play
     registry.sp1155().burn(msg.sender, 11, tReg.cost);
@@ -173,7 +200,7 @@ contract PaidTournaments is Ownable, MatchMaker {
   function playTournamentRound(uint128 tournamentId) external onlyCore {
 
     Tournament memory tournament = idToTournament[tournamentId];
-    require(_now() > tournament.start, Errors.NEXT_MATCH_NOT_READY);
+    require(_now() >= tournament.start, Errors.NEXT_MATCH_NOT_READY);
 
     registry.rng().checkBlockRandom(msg.sender);
     // Reverts if no random
@@ -220,6 +247,18 @@ contract PaidTournaments is Ownable, MatchMaker {
   }
 
 
+  function getWinner(uint128 tournamentId) external view returns(address) {
+    Tournament memory tournament = idToTournament[tournamentId];
+    require(tournament.k == (2**tournament.details.matchCount) * 2 - 1, 
+      Errors.TOURNAMENT_NOT_FINISHED);
+  
+    uint16 winnerIdx = uint16(2**tournament.details.matchCount) * 2 - 2;
+    address first = tournamentToPlayers[tournamentId][winnerIdx];
+
+    return first;
+  }
+
+
   function finishTournament(uint128 tournamentId) external onlyCore {
     
     Tournament memory tournament = idToTournament[tournamentId];
@@ -229,11 +268,11 @@ contract PaidTournaments is Ownable, MatchMaker {
     uint16 winnerIdx = uint16(2**tournament.details.matchCount) * 2 - 2;
     address first = tournamentToPlayers[tournamentId][winnerIdx];
 
-    registry.management().unlockDefaultFive(first);
-  
     address rewardAddress = tournament.details.rewardAddress;
     Reward rewardType = tournament.details.rewardType;
 
+    // TODO: Change this to minting, tournaments are authorized contracts
+    // anyway, there should be no difference instead of tokenomics implications
     if(rewardType == Reward.ERC20) {
       require(ERC20(rewardAddress).approve({
         spender: first, 
@@ -259,6 +298,18 @@ contract PaidTournaments is Ownable, MatchMaker {
 
     delete idToTournament[tournamentId].details;
     delete idToTournament[tournamentId];
+
+    registry.management().unlockDefaultFive(first);
+  }
+
+  // Required so that we can receive ERC721s
+  function onERC721Received(address,address,uint256,bytes memory) public virtual returns (bytes4) {
+    return this.onERC721Received.selector;
+  }
+
+  // Required so that we can receive ERC1155s
+  function onERC1155Received(address,address,uint256,uint256,bytes memory) public virtual returns (bytes4) {
+    return this.onERC1155Received.selector;
   }
 
   function _now() private view returns(uint48) {

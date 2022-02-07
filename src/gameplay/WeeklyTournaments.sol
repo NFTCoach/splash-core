@@ -29,6 +29,7 @@ struct TournamentRegistration {
 
 struct UserRegistry {
   bool registered;
+  uint16 registeredIdx;
   uint256[] veterans;
   uint256[] retireds;
 }
@@ -38,7 +39,7 @@ struct UserRegistry {
 
   @author Hamza Karabag
 */
-contract WeeklyTournament is Ownable, MatchMaker {
+contract WeeklyTournaments is Ownable, MatchMaker {
   using ABDKMath64x64 for int128;
   /* IRegistry registry from MatchMaker */
 
@@ -117,7 +118,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
 
     @dev Management contract checks msg.sender's players to ensure they are eligible
   */
-  function enterTournamentQueue(
+  function enterQueue(
     uint8 pass, 
     uint256[] memory veteranList,
     uint256[] memory retiredList
@@ -139,7 +140,13 @@ contract WeeklyTournament is Ownable, MatchMaker {
       Errors.NOT_ENOUGH_PLAYERS_STAKED
     );
 
-    userToRegistry[msg.sender] = UserRegistry(true, veteranList, retiredList);
+    userToRegistry[msg.sender] = UserRegistry(
+      true, 
+      tReg.playerCount, 
+      veteranList, 
+      retiredList
+    );
+
     passToQueue[pass][tReg.playerCount++] = msg.sender;
 
     uint256 playerLimit = 2 ** tReg.matchCount;
@@ -147,19 +154,48 @@ contract WeeklyTournament is Ownable, MatchMaker {
       tReg.tournamentCount++;
     }
 
+    IManagement management = registry.management();
     // These will revert if there's a problem with locking
-    registry.management().lockVeteranBatch(msg.sender, veteranList);
-    registry.management().lockRetiredBatch(msg.sender, retiredList);
+    management.lockVeteranBatch(msg.sender, veteranList);
+    management.lockRetiredBatch(msg.sender, retiredList);
 
     // This will also revert if starters aren't ready
-    registry.management().checkStarters(
+    management.checkStarters(
       msg.sender, 
       tReg.matchCount, 
       tReg.deadline + (tReg.matchCount * TOURNAMENT_INTERVAL)
     );
-    registry.management().lockDefaultFive(msg.sender);
+    management.lockDefaultFive(msg.sender);
 
     emit TournamentRegistered(msg.sender, pass);
+  }
+
+
+  function leaveQueue(uint8 pass) external {
+    
+    TournamentRegistration memory tReg = passToRegistry[pass];
+    UserRegistry memory uReg = userToRegistry[msg.sender];
+    
+    require(tReg.playerCount > 0, Errors.TOURNAMENT_EMPTY);
+    require(
+      passToQueue[pass][uReg.registeredIdx] == msg.sender, 
+      Errors.NOT_IN_TOURNAMENT
+    );
+
+    passToRegistry[pass].playerCount -= 1;
+
+    if(tReg.playerCount > 1) {
+      passToQueue[pass][uReg.registeredIdx] = 
+        passToQueue[pass][tReg.playerCount-1];
+    }
+
+    delete passToQueue[pass][tReg.playerCount-1];
+    delete userToRegistry[msg.sender];
+
+    IManagement management = registry.management();
+    management.unlockDefaultFive(msg.sender);
+    management.unlockVeteranBatch(msg.sender, uReg.veterans);
+    management.unlockRetiredBatch(msg.sender, uReg.retireds);
   }
   
   /**
@@ -187,11 +223,6 @@ contract WeeklyTournament is Ownable, MatchMaker {
 
     tReg.active = false;
 
-    // Generate the random
-    registry.rng().checkBlockRandom(msg.sender);
-    // It'll revert if there's no random number
-    uint256 tournamentRandomness = registry.rng().getBlockRandom(msg.sender);
-    
     // Divide the player pool into individual tournaments
     uint256 tournamentCount = tReg.tournamentCount;
     uint16 playerLimit = uint16(2**tReg.matchCount);
@@ -208,30 +239,12 @@ contract WeeklyTournament is Ownable, MatchMaker {
         prizePool: tReg.prizePool / tournamentCount
       });
 
-      emit TournamentCreated(_tournamentNonce, pass);
-
-      // Get a list of indexes for each tournament
-      // Something like [ 0,1,2,3,4,5,..,15 ]
-      uint16[] memory idxList;
-      for (uint16 j = 0; j < playerLimit; j++)
-        idxList[j] = j;
-
-      // Pick a random index from the list,
-      // Assign the next player to this random tournament slot
-      // Repeat until index list is empty
-      // This should randomize a single tournament's game order
-      for (uint16 size = playerLimit; size > 0; size--) {
-        uint256 randIdx = tournamentRandomness % size - 1;
-        uint16 tSlot = idxList[randIdx];
-
-        tournamentToPlayers[_tournamentNonce][tSlot] = 
-          passToQueue[pass][uint16((i+1) * playerLimit - size)]; 
-      
-        // Remove the index from the list
-        delete idxList[randIdx];
+      for (uint16 j = 0; j < playerLimit; j++) {
+        tournamentToPlayers[_tournamentNonce][j] = 
+          passToQueue[pass][uint16(i*playerLimit + j)];
       }
 
-      delete idxList; // This might be pointless
+      emit TournamentCreated(_tournamentNonce, pass);      
     }
   }
 
@@ -247,7 +260,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
 
     Tournament memory tournament = idToTournament[tournamentId];
     
-    require(_now() > tournament.start, Errors.NEXT_MATCH_NOT_READY);
+    require(_now() >= tournament.start, Errors.NEXT_MATCH_NOT_READY);
 
     // Requires a new request for random
     registry.rng().checkBlockRandom(msg.sender);
@@ -303,6 +316,24 @@ contract WeeklyTournament is Ownable, MatchMaker {
     registry.rng().resetBlockRandom(msg.sender);
   }
 
+  function getWinners(uint128 tournamentId) public view returns(address, address) {
+    Tournament memory tournament = idToTournament[tournamentId];
+    uint16 playerCount = uint16(2**tournament.matchCount);
+
+    require(
+      tournament.k == playerCount * 2 - 1, 
+      Errors.TOURNAMENT_NOT_FINISHED
+    );
+  
+    uint16 winnerIdx = playerCount * 2 - 2;
+    address first = tournamentToPlayers[tournamentId][winnerIdx];
+    address second = tournamentToPlayers[tournamentId][winnerIdx-1] != first
+      ? tournamentToPlayers[tournamentId][winnerIdx-1]
+      : tournamentToPlayers[tournamentId][winnerIdx-2];
+
+    return ( first, second );
+  }
+
   /**
     == ONLY CORE ==
 
@@ -321,12 +352,7 @@ contract WeeklyTournament is Ownable, MatchMaker {
   function finishTournament(uint128 tournamentId) external onlyCore {
     Tournament memory tournament = idToTournament[tournamentId];
 
-    require(tournament.k == (2**tournament.matchCount) * 2 - 1, Errors.TOURNAMENT_NOT_FINISHED);
-
-    // Set up variables for convenience
-    uint16 winnerIdx = uint16(2**tournament.matchCount) * 2 - 2;
-    address first = tournamentToPlayers[tournamentId][winnerIdx];
-    address second = tournamentToPlayers[tournamentId][winnerIdx - 1];
+    (address first, address second) = getWinners(tournamentId);
     uint256 totalPrize = tournament.prizePool;
 
     int128 firstCoeff = registry.staking().getCoefficient(first);
@@ -343,15 +369,9 @@ contract WeeklyTournament is Ownable, MatchMaker {
     management.unlockRetiredBatch(first, userToRegistry[first].retireds);
 
     // Approve prize to the winner
-    _approveSplash(first, winnerPrize);
-    _approveSplash(second, totalPrize - winnerPrize);
-  }
-
-  function _approveSplash(address to, uint256 amount) private {
-    require(
-      registry.sp20().increaseAllowance(to, amount),
-      Errors.TOKEN_APPROVE_FAIL
-    );
+    ISP20 sp20 = registry.sp20();
+    sp20.mint(first, winnerPrize);
+    sp20.mint(second, totalPrize - winnerPrize);
   }
 
   function _now() private view returns(uint48) {

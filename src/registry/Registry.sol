@@ -19,6 +19,11 @@ contract Registry is IRegistry, Ownable {
   mapping(address => bool) public coreAddresses;
   mapping(address => bool) public authorizedContracts;
 
+  constructor() {
+    giveCoreAccess(msg.sender);
+    giveAuthorization(msg.sender);
+  }
+
   // RNG
   function rng() external view override returns(IRNG) { return _rng; }
   function setRng(IRNG newRng) external onlyOwner { _rng = newRng; } 
@@ -29,7 +34,15 @@ contract Registry is IRegistry, Ownable {
 
   // SP721
   function sp721() external view override returns(ISP721) { return _sp721; }
-  function setSp721(ISP721 newSp721) external onlyOwner { _sp721 = newSp721; }
+  function setSp721(ISP721 newSp721) external onlyOwner { 
+    // Deauthorize the old contract
+    authorizedContracts[address(_sp721)] = false;
+    
+    _sp721 = newSp721;
+    
+    // Authorize the new contract
+    authorizedContracts[address(_sp721)] = true;
+  }
 
   // SP1155
   function sp1155() external view override returns(ISP1155) { return _sp1155; }
@@ -41,14 +54,22 @@ contract Registry is IRegistry, Ownable {
 
   // Management
   function management() external view override returns(IManagement) { return _management; }
-  function setManagement(IManagement newManagement) external onlyOwner { _management = newManagement; }
+  function setManagement(IManagement newManagement) external onlyOwner {
+    // Deauthorize the old contract
+    authorizedContracts[address(_management)] = false;
+
+    _management = newManagement; 
+    
+    // Authorize the new contract
+    authorizedContracts[address(_management)] = true;
+  }
 
   // Core Addresses
   function core(address user) external view override returns(bool) {
     return coreAddresses[user];
   } 
 
-  function giveCoreAccess(address user) external onlyOwner {
+  function giveCoreAccess(address user) public onlyOwner {
     require(!coreAddresses[user], "User already has access");
     coreAddresses[user] = true;
   }
@@ -63,7 +84,7 @@ contract Registry is IRegistry, Ownable {
     return authorizedContracts[contractAddress];
   }
 
-  function giveAuthorization(address contractAddress) external onlyOwner {
+  function giveAuthorization(address contractAddress) public onlyOwner {
     require(!authorizedContracts[contractAddress], "Contract is already authorized");
     authorizedContracts[contractAddress] = true;
   }

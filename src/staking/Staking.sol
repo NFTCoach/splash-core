@@ -63,7 +63,7 @@ contract Staking is Ownable, IStaking {
     registry = IRegistry(registryAddress);
 
     rewardRate = initialRewardRate;
-    for (uint8 i = 0; i <= initialRequirements.length; i++) {
+    for (uint8 i = 0; i < initialRequirements.length; i++) {
       passRequirements[i + 1] = initialRequirements[i];
     }
   }
@@ -193,6 +193,8 @@ contract Staking is Ownable, IStaking {
     info.enteredAt = uint48(block.timestamp);
   
     totalStaked += stakeAmount;
+
+    require(registry.sp20().transferFrom(msg.sender, address(this), stakeAmount), "Token checkout failed");
   }
 
   function exitStake() external {

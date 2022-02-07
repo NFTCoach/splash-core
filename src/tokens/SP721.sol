@@ -11,7 +11,7 @@ struct PlayerInfo {
   uint48 lastChallenge;
 }
 
-contract PLAYER is ERC721, Ownable {
+contract PLAYER is ERC721, Ownable, ISP721 {
   IRegistry registry;
 
   mapping(uint256 => PlayerInfo) public idToPlayerInfo;
@@ -25,7 +25,7 @@ contract PLAYER is ERC721, Ownable {
     registry = IRegistry(registryAddress);
   }
 
-  function safeMint(address to, uint256 tokenId) external authorized {
+  function safeMint(address to, uint256 tokenId) external override authorized {
     _safeMint(to, tokenId);
   }
 

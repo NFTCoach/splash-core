@@ -16,7 +16,7 @@ import "../interfaces/IRegistry.sol";
 
     @author Hamza Karabag
 */
-contract SP1155 is ERC1155, Ownable, ERC1155Burnable {
+contract CARDS is ERC1155, Ownable, ERC1155Burnable, ISP1155 {
     IRegistry registry;
 
     modifier authorized() {
@@ -24,7 +24,7 @@ contract SP1155 is ERC1155, Ownable, ERC1155Burnable {
       _;
     }
 
-    constructor(address registryAddress) ERC1155("NC1155") {
+    constructor(IRegistry registryAddress) ERC1155("NC1155") {
       registry = IRegistry(registryAddress);
     }
 
@@ -37,7 +37,7 @@ contract SP1155 is ERC1155, Ownable, ERC1155Burnable {
         uint256 id,
         uint256 amount,
         bytes memory data
-    ) public onlyOwner {
+    ) external authorized {
         _mint(account, id, amount, data);
     }
 
@@ -46,7 +46,7 @@ contract SP1155 is ERC1155, Ownable, ERC1155Burnable {
         uint256[] memory ids,
         uint256[] memory amounts,
         bytes memory data
-    ) public onlyOwner {
+    ) external authorized {
         _mintBatch(to, ids, amounts, data);
     }
 
@@ -54,7 +54,7 @@ contract SP1155 is ERC1155, Ownable, ERC1155Burnable {
         address account,
         uint256 id,
         uint256 value
-    ) public override(ERC1155Burnable) authorized {
+    ) public override(ERC1155Burnable, ISP1155) authorized {
         _burn(account, id, value);
     }
 }
