@@ -70,7 +70,7 @@ contract Marketplace is Ownable {
   event CardSold(uint32 indexed cardType, uint256 listingId);
   event CardDelisted(uint256 listingId);
 
-  event CommisionChanged(uint128 newCommision)
+  event CommisionChanged(uint128 newCommision);
 
   constructor(IRegistry registryAddress) {
     registry = IRegistry(registryAddress);
