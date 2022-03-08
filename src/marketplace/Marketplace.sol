@@ -70,6 +70,8 @@ contract Marketplace is Ownable {
   event CardSold(uint32 indexed cardType, uint256 listingId);
   event CardDelisted(uint256 listingId);
 
+  event CommisionChanged(uint128 newCommision)
+
   constructor(IRegistry registryAddress) {
     registry = IRegistry(registryAddress);
   }
@@ -79,6 +81,7 @@ contract Marketplace is Ownable {
   /** @dev Setter for _commission */
   function setCommission(uint128 newCommission) external onlyOwner {
     _commission = newCommission;
+    emit CommisionChanged(newCommission);
   }
 
   function setCardPrice(uint256 id, uint256 newPrice) external onlyOwner {

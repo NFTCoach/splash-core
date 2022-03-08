@@ -52,6 +52,8 @@ contract WeeklyTournaments is Ownable, MatchMaker {
   event TournamentRegistered    (address user, uint8 pass);
   event TournamentCreated       (uint128 tournamentId, uint8 pass);
   event TournamentFinished      (uint128 tournamentId);
+  event FirstWeightChanged      (uint8 newWeight);
+  event SecondWeightChanged     (uint8 newWeight);
 
   mapping(uint128 => Tournament)                  public idToTournament;
   mapping(uint128 => mapping(uint16 => address))  public tournamentToPlayers;
@@ -76,10 +78,13 @@ contract WeeklyTournaments is Ownable, MatchMaker {
 
   function setFirstWeight(uint8 newWeight) external onlyOwner {
     _firstWeight = newWeight;
+    emit FirstWeightChanged(newWeight);
   }
 
   function setSecondWeight(uint8 newWeight) external onlyOwner {
     _secondWeight = newWeight;
+    emit SecondWeightChanged(newWeight);
+
   }
 
   // ############## TOURNAMENT CREATION ############## //

@@ -50,6 +50,7 @@ contract Staking is Ownable, IStaking {
   event MaxStakeRateChanged     (int128 newStakeRate);
   event MaxTimeRateChanged      (int128 newTimeRate);
   event PassRequirementChanged  (uint8 pass);
+  event EnteredStake            (address user, uint8 pass);
 
   // Passes start from 1
   mapping(uint8 => PassRequirement)  public passRequirements;
@@ -193,6 +194,8 @@ contract Staking is Ownable, IStaking {
     info.enteredAt = uint48(block.timestamp);
   
     totalStaked += stakeAmount;
+
+    emit EnteredStake(msg.sender, pass);
 
     require(registry.sp20().transferFrom(msg.sender, address(this), stakeAmount), "Token checkout failed");
   }
